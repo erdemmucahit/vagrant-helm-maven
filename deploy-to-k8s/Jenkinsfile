@@ -1,0 +1,78 @@
+
+pipeline {
+	agent {
+		label 'agents'
+	}
+	environment {
+		JOB_NAME = "simple-java-maven-app"
+		REGISTRY = "10.0.0.11:8081"        /* nexus.ipsi yazılacak*/
+		HELM_TEPLATE_FOLDER = "/tmp/simple-java-maven-app/simple-maven-app/"
+		HELM_VALUES_FILE_FOLDER ="/tmp/simple-java-maven-app/simple-maven-app"
+		PIPELINE_PATH = "/tmp/"
+		DOCKERFILE_PATH = "/tmp/"
+		NAMESPACE = "master"                  /* branch bazinda degisecek  */
+		//SKIPTESTS = "true"
+		PIPELINE_REPO = "https://github.com/jenkins-docs/simple-java-maven-app.git"
+    }
+	options {
+		disableConcurrentBuilds()
+	}
+	stages {
+		stage('Download Pipeline Yamls') {
+			steps {
+				script {
+				    sh "mkdir -p ${PIPELINE_PATH}/${job_name}/${NAMESPACE}"
+				    sh "rm -Rf ${PIPELINE_PATH}/${job_name}/${NAMESPACE}/*"
+				    sh "git -C ${PIPELINE_PATH}/${job_name}/${NAMESPACE} clone ${PIPELINE_REPO} "
+					sh "git -C ${PIPELINE_PATH}/${job_name}/${NAMESPACE}/${PIPELINE_REPO} checkout ${NAMESPACE}"
+					sh "git -C ${PIPELINE_PATH}/${job_name}/${NAMESPACE}/${PIPELINE_REPO} pull"
+				}
+			}
+		}
+		stage('Maven Clean') {
+			steps {
+				sh "mvn clean package -DskipTests=${SKIPTESTS}"
+			}
+		}
+		stage('Docker Build') {
+			steps {
+				script {
+					sh "cp ${PIPELINE_PATH}/${job_name}/${NAMESPACE}/${PIPELINE_REPO}/${DOCKERFILE_PATH}/Dockerfile ."
+					//sh "cd ${DOCKERFILE_PATH}"
+					sh "docker build . \
+					    --build-arg APP_NAME='${job_name}' \
+					     -t ${REGISTRY}/${job_name}:${NAMESPACE}${env.BUILD_ID}"
+				}
+			}
+		}
+		stage('Docker Push') {
+			steps {
+				script{
+					sh "docker push ${REGISTRY}/${job_name}:${NAMESPACE}${env.BUILD_ID}"
+				}
+			}
+		}
+		stage('Delete Build Image') {
+			steps {
+				sh "docker images | grep  ${env.REGISTRY_HOST}/${job_name} | grep ${env.BRANCH_NAME}${env.BUILD_ID} | awk '{print \$3}' | xargs docker rmi"
+			}
+		}
+		stage('Helm Deploy') {
+			steps {
+				withCredentials([file(credentialsId: 'kubeconfig', variable: 'kubeconfig')])   /* Jenkins credential  */
+				 {
+				    sh "echo 'name: ${job_name}'>>${HELM_TEPLATE_FOLDER}/Chart.yaml"
+					sh "helm upgrade --install ${job_name} ${HELM_TEPLATE_FOLDER}/  \
+					    --set image.tag=${env.BUILD_ID} \
+					    --set image.branch=${NAMESPACE} \
+					    --set appVersion=${env.BUILD_ID}   \
+					    --set version=${env.BUILD_ID}   \
+					    --set fullnameOverride=${job_name} \
+					    --values ${HELM_VALUES_FILE_FOLDER}/values.yaml \
+					    --kubeconfig=${kubeconfig} \
+					    --namespace=${NAMESPACE}"
+				    sh "rm ${HELM_TEPLATE_FOLDER}/Chart.yaml"
+				}
+			}
+		}
+}
