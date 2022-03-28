@@ -6,7 +6,7 @@ POD_CIDR="192.168.0.0/16"
 
 sudo kubeadm config images pull
 
-echo "Preflight Check Passed: Downloaded All Required Images"
+echo "Downloaded All Required Images"
 
 
 sudo kubeadm init --apiserver-advertise-address=$MASTER_IP  --apiserver-cert-extra-sans=$MASTER_IP --pod-network-cidr=$POD_CIDR --node-name $NODENAME --ignore-preflight-errors Swap
